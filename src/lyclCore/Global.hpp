@@ -24,6 +24,7 @@ namespace lycl
     {
         A_Lyra2REv2,
         A_Lyra2REv3,
+        A_Lyra2Z,
 
         A_None
     } EAlgorithm;
