@@ -65,7 +65,9 @@ namespace lycl
         if (strIEqual(algo_name, "Lyra2REv3"))
             result = A_Lyra2REv3; 
         else if (strIEqual(algo_name, "Lyra2REv2"))
-            result = A_Lyra2REv2; 
+            result = A_Lyra2REv2;
+        else if (strIEqual(algo_name, "Lyra2Z"))
+            result = A_Lyra2Z; 
         else
             result = A_None;
 
@@ -87,6 +89,10 @@ namespace lycl
         case A_Lyra2REv3:
             {
                 out_algo_name = "Lyra2REv3";
+            }break;
+        case A_Lyra2Z:
+            {
+                out_algo_name = "Lyra2Z";
             }break;
         }
     }

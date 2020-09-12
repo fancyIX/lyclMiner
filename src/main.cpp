@@ -19,6 +19,7 @@
 // Applets
 #include <lyclApplets/AppLyra2REv2.hpp>
 #include <lyclApplets/AppLyra2REv3.hpp>
+#include <lyclApplets/AppLyra2Z.hpp>
 
 #include <lyclHostValidators/BMW.hpp>
 
@@ -723,7 +724,319 @@ void* workerThread_lyra2REv3( void *userdata )
     return NULL;
 }
 
+//-----------------------------------------------------------------------------
+// Lyra2Z worker.
+//-----------------------------------------------------------------------------
+void* workerThread_lyra2Z( void *userdata )
+{
+    thr_info *mythr = (thr_info *) userdata;
+    int thr_id = mythr->id;
 
+    // Init device context.
+    lycl::AppLyra2Z deviceCtx;
+    lycl::device clDevice = mythr->clDevice;
+    if (!deviceCtx.onInit(mythr->clDevice))
+    {
+        Log::print(Log::LT_Error, "Failed to initialize device(%d)! Skipping...", thr_id);
+        // exit
+        deviceCtx.onDestroy();
+        tq_freeze(mythr->q);
+        return NULL;
+    }
+
+    work workInfo;
+    memset(&workInfo, 0, sizeof(work));
+    time_t firstwork_time = 0;
+
+    std::chrono::steady_clock::time_point m_start;
+    std::chrono::steady_clock::time_point m_end;
+
+    //-------------------------------------
+    // compute max runs
+    // 4294967295 max nonce
+    const uint64_t numNonces = 4294967296ULL / (uint64_t)global::numWorkerThreads;
+    uint32_t maxRuns = (uint32_t)(numNonces / (uint32_t)clDevice.workSize);
+    // last device
+    if (thr_id == (global::numWorkerThreads-1))
+        maxRuns += (uint32_t)(numNonces % global::numWorkerThreads);
+
+    // Host side validation
+    //std::vector<lycl::lyraHash> m_hashes(clDevice.workSize);
+    std::vector<uint32_t> m_potentialNonces;
+    std::vector<uint32_t> m_nonces;
+
+    Log::print(Log::LT_Debug, "Device: %d max runs: %u", thr_id, maxRuns);
+
+    uint32_t numRuns = 0;
+
+    for (;;)
+    {
+        uint64_t hashes_done;
+
+        //-------------------------------------
+        // wait for diff
+        while(time(NULL) >= g_work_time + 120)
+            sleep(1);
+
+        pthread_mutex_lock( &g_work_lock );
+        //-------------------------------------
+        // get new work from stratum.
+        if (numRuns >= maxRuns)
+        {
+            // generate new work
+            stratumGenWork(&stratum, &global::g_work);
+        }
+        //-------------------------------------
+        // setup a nonce range for each worker thread
+        const int32_t workCmpSize = WorkCmpSize;
+        if ( memcmp( workInfo.data, global::g_work.data, workCmpSize)
+             && (stratum.job.clean || (numRuns >= maxRuns) || (workInfo.job_id != global::g_work.job_id)) )
+        {
+            Log::print(Log::LT_Debug, "Device: %d has completed its nonce range", thr_id);
+
+            // get new work
+            workFree(&workInfo );
+            workCopy(&workInfo, &global::g_work);
+            // reset run counter
+            numRuns = 0;
+        }
+
+        pthread_mutex_unlock( &g_work_lock );
+        //-------------------------------------
+        // if work is not available
+        if (!workInfo.data[0])
+        {
+            sleep(1);
+            continue;
+        }
+        //-------------------------------------
+        // time limit
+        if ( global::opt_timeLimit && firstwork_time )
+        {
+            int passed = (int)( time(NULL) - firstwork_time );
+            int remain = (int)( global::opt_timeLimit - passed );
+            if ( remain < 0 )
+            {
+                if ( thr_id != 0 )
+                {
+                    sleep(1);
+                    continue;
+                }
+                Log::print(Log::LT_Notice, "Mining timeout of %ds reached, exiting...", global::opt_timeLimit);
+                
+                // exit
+                deviceCtx.onDestroy();
+                tq_freeze(mythr->q);
+                return NULL;
+            }
+        }
+        // init time
+        if (firstwork_time == 0)
+            firstwork_time = time(NULL);
+        gwork_restart[thr_id].restart = 0;
+        hashes_done = 0;
+        m_start = std::chrono::steady_clock::now();
+
+//-----------------------------------------------------------------------------
+        // Scan for nonce
+        uint32_t* pdata = workInfo.data;
+        uint32_t* ptarget = workInfo.target;
+        const uint32_t Htarg = ptarget[7];
+        const uint32_t offsetN = (maxRuns * clDevice.workSize)*thr_id;
+        const uint32_t first_nonce = offsetN + (numRuns * clDevice.workSize);
+        uint32_t nonce = first_nonce;
+
+        //-------------------------------------
+        // compute a midstate
+        if (!numRuns)
+        {
+            lycl::KernelData kernelData;
+            memset(&kernelData, 0, sizeof(kernelData));
+            
+            uint32_t h[8] =
+            {
+                0x6A09E667, 0xBB67AE85,
+                0x3C6EF372, 0xA54FF53A,
+                0x510E527F, 0x9B05688C,
+                0x1F83D9AB, 0x5BE0CD19
+            };
+            
+            kernelData.in16 = pdata[16];
+            kernelData.in17 = pdata[17];
+            kernelData.in18 = pdata[18];
+
+            blake256_compress(h, pdata);
+
+            kernelData.uH0 = h[0];
+            kernelData.uH1 = h[1];
+            kernelData.uH2 = h[2];
+            kernelData.uH3 = h[3];
+            kernelData.uH4 = h[4];
+            kernelData.uH5 = h[5];
+            kernelData.uH6 = h[6];
+            kernelData.uH7 = h[7];
+            kernelData.htArg = Htarg;
+            //Log::print(Log::LT_Notice, "Device:%d block:%u,%u,%u,%u,%u,%u,%u,%u", thr_id, h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+            //-------------------------------------
+            // upload data
+            deviceCtx.setKernelData(kernelData);
+        }
+
+        bool nonceFound = false;
+        bool isMultiNonce = false; // numNonces > 1
+
+        uint32_t numPotentialNonces = 0;
+        uint32_t singleNonce;
+        do
+        {
+            deviceCtx.onRun(nonce, clDevice.workSize);
+
+            // assume only 1 potential nonce was found.
+            deviceCtx.getHtArgTestResultAndSize(singleNonce, numPotentialNonces);
+
+            // check if nonce was found
+            if (numPotentialNonces != 0)
+            {
+                //Log::print(Log::LT_Notice, "Num potential nonces found: %u", numPotentialNonces);
+                lycl::uint32x8 clhash;
+                deviceCtx.getLatestHashResultForIndex(singleNonce, clhash);
+                // compute bmw hash
+                lycl::uint32x8 lhash;
+                lycl::bmwHash(clhash, lhash);
+
+                if (fulltestU32x8(lhash, ptarget))
+                {
+                    // add nonce local offset
+                    singleNonce += nonce;
+                    work_set_target_ratio(&workInfo, &lhash.h[0]);
+                    nonceFound = true;
+                    if (numPotentialNonces == 1)
+                    {
+                        ++numRuns; // run completed
+                        break;
+                    }
+                    else
+                        m_nonces.push_back(singleNonce);
+                }
+
+                // continue with remaining potential nonces if they were found
+                if (numPotentialNonces > 1)
+                {
+                    size_t numRemainingNonces = numPotentialNonces-1; // skip first nonce
+                    deviceCtx.getHtArgTestResults(m_potentialNonces, numRemainingNonces, 2);
+                    
+                    for (size_t g = 0; g < numRemainingNonces; ++g)
+                    {
+                        deviceCtx.getLatestHashResultForIndex(m_potentialNonces[g], clhash);
+                        // compute bmw hash
+                        lycl::bmwHash(clhash, lhash);
+
+                        if (fulltestU32x8(lhash, ptarget))
+                        {
+                            isMultiNonce = true;
+                            // add nonce local offset
+                            m_nonces.push_back(m_potentialNonces[g] + nonce); 
+
+                            work_set_target_ratio(&workInfo, &lhash.h[0]);
+                        }
+                    }
+                }
+
+                if (isMultiNonce)
+                {
+                    ++numRuns; // run completed
+                    break;
+                }
+
+                // all nonces are invalid.
+                // clear result to prevent duplicate shares
+                deviceCtx.clearResult(numPotentialNonces);
+            }
+
+            // prepare for the next run
+            nonce += clDevice.workSize;
+            ++numRuns;
+
+        } while (numRuns < maxRuns && !gwork_restart[thr_id].restart);
+
+        hashes_done = uint64_t(offsetN + (numRuns * clDevice.workSize)) - uint64_t(first_nonce);
+
+        //-----------------------------------------------------------------------------
+
+        // record scanhash elapsed time
+        m_end = std::chrono::steady_clock::now();
+        auto diff = m_end - m_start;
+        double elapsedTimeMs = std::chrono::duration<double, std::milli>(diff).count();
+        if (elapsedTimeMs)
+        {
+            pthread_mutex_lock( &stats_lock );
+            thr_hashcount[thr_id] = hashes_done;
+            thr_hashrates[thr_id] = hashes_done / (elapsedTimeMs * 0.001);
+            pthread_mutex_unlock( &stats_lock );
+        }
+
+        // if nonce(s) found submit work 
+        if (nonceFound)
+        {
+            if (!isMultiNonce) // nonces == 1
+            {
+                pdata[19] = singleNonce;
+                if ( !submit_work( mythr, &workInfo ) )
+                {
+                    Log::print(Log::LT_Warning, "Failed to submit share.");
+                    break;
+                }
+                else
+                    Log::print(Log::LT_Notice, "Share submitted.");
+
+                // clear result to prevent duplicate shares
+                deviceCtx.clearResult(1);
+            }
+            else
+            {
+                for (size_t i = 0; i < m_nonces.size(); ++i)
+                {
+                    pdata[19] = m_nonces[i];
+                    if ( !submit_work( mythr, &workInfo ) )
+                    {
+                        Log::print(Log::LT_Warning, "Failed to submit share.");
+                        break;
+                    }
+                    else
+                        Log::print(Log::LT_Notice, "Share submitted.");
+                }
+                // no longer needed.
+                m_nonces.clear();
+                // clear result to prevent duplicate shares
+                deviceCtx.clearResult(numPotentialNonces);
+            }
+        }
+
+        // display hashrate
+        char hc[16];
+        char hr[16];
+        char hc_units[2] = {0,0};
+        char hr_units[2] = {0,0};
+        double hashcount = thr_hashcount[thr_id];
+        double hashrate  = thr_hashrates[thr_id];
+        if ( hashcount )
+        {
+            scale_hash_for_display( &hashcount, hc_units );
+            scale_hash_for_display( &hashrate,  hr_units );
+            if ( hc_units[0] )
+                sprintf( hc, "%.2f", hashcount );
+            else // no fractions of a hash
+                sprintf( hc, "%.0f", hashcount );
+            sprintf( hr, "%.2f", hashrate );
+            Log::print( Log::LT_Info, "Device #%d: %s %sH, %s %sH/s", thr_id, hc, hc_units, hr, hr_units );
+        }
+    }  // worker_thread loop
+
+    deviceCtx.onDestroy();
+
+    tq_freeze(mythr->q);
+    return NULL;
+}
 
 int main(int argc, char** argv)
 {
@@ -1408,6 +1721,8 @@ int main(int argc, char** argv)
             thrResult = thread_create(thr, workerThread_lyra2REv3);
         else if (selectedAlgo == lycl::A_Lyra2REv2)
             thrResult = thread_create(thr, workerThread_lyra2REv2);
+        else if (selectedAlgo == lycl::A_Lyra2Z)
+            thrResult = thread_create(thr, workerThread_lyra2Z);
         else // should never happen
         {
             Log::print(Log::LT_Error, "worker thread %d create failed. Algorithm is not set or incorrect!", i);
