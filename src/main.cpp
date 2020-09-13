@@ -900,15 +900,15 @@ void* workerThread_lyra2Z( void *userdata )
                 //Log::print(Log::LT_Notice, "Num potential nonces found: %u", numPotentialNonces);
                 lycl::uint32x8 clhash;
                 deviceCtx.getLatestHashResultForIndex(singleNonce, clhash);
-                // compute bmw hash
+                /* // compute bmw hash
                 lycl::uint32x8 lhash;
                 lycl::bmwHash(clhash, lhash);
 
-                if (fulltestU32x8(lhash, ptarget))
+                if (fulltestU32x8(lhash, ptarget))*/
                 {
                     // add nonce local offset
                     singleNonce += nonce;
-                    work_set_target_ratio(&workInfo, &lhash.h[0]);
+                    work_set_target_ratio(&workInfo, &clhash.h[0]);
                     nonceFound = true;
                     if (numPotentialNonces == 1)
                     {
@@ -927,17 +927,17 @@ void* workerThread_lyra2Z( void *userdata )
                     
                     for (size_t g = 0; g < numRemainingNonces; ++g)
                     {
-                        deviceCtx.getLatestHashResultForIndex(m_potentialNonces[g], clhash);
+                        /* deviceCtx.getLatestHashResultForIndex(m_potentialNonces[g], clhash);
                         // compute bmw hash
                         lycl::bmwHash(clhash, lhash);
 
-                        if (fulltestU32x8(lhash, ptarget))
+                        if (fulltestU32x8(lhash, ptarget))*/
                         {
                             isMultiNonce = true;
                             // add nonce local offset
                             m_nonces.push_back(m_potentialNonces[g] + nonce); 
 
-                            work_set_target_ratio(&workInfo, &lhash.h[0]);
+                            work_set_target_ratio(&workInfo, &clhash.h[0]);
                         }
                     }
                 }

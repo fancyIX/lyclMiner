@@ -62,8 +62,8 @@ namespace lycl
         cl_program m_clProgramLyra888p2;
         cl_kernel m_clKernelLyra888p2;
         // lyra888p3
-        cl_program m_clProgramLyra888p3;
-        cl_kernel m_clKernelLyra888p3;
+        cl_program m_clProgramLyra888p3HTarg;
+        cl_kernel m_clKernelLyra888p3HTarg;
         // buffers
         cl_mem m_clMemHashStorage;
         cl_mem m_clMemLyraStates;
@@ -287,7 +287,7 @@ namespace lycl
         }
         usingPrebuiltBinary = asmSuccess;
 
-        m_clKernelLyra888p2 = clCreateKernel(m_clProgramLyra888p2, "search2", &errorCode);
+        m_clKernelLyra888p2 = clCreateKernel(m_clProgramLyra888p2, usingPrebuiltBinary ? "search2" : "lyra888p2", &errorCode);
         if (errorCode != CL_SUCCESS)
         {
             std::cerr << "Failed to create kernel(lyra888p2). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
@@ -302,28 +302,34 @@ namespace lycl
 
         //-------------------------------------
         // Create an OpenCL lyra888p3 kernel
-        m_clProgramLyra888p3 = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra888p3/lyra888p3.cl");
-        if (m_clProgramLyra888p3 == NULL)
+        m_clProgramLyra888p3HTarg = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra888p3/lyra888p3_htarg.cl");
+        if (m_clProgramLyra888p3HTarg == NULL)
         {
-            std::cerr << "Failed to create a CL program from source(lyra888p3). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            std::cerr << "Failed to create a CL program from source(lyra888p3_htarg). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
             return false;
         }
-        m_clKernelLyra888p3 = clCreateKernel(m_clProgramLyra888p3, "lyra888p3", &errorCode);
+        m_clKernelLyra888p3HTarg = clCreateKernel(m_clProgramLyra888p3HTarg, "lyra888p3_htarg", &errorCode);
         if (errorCode != CL_SUCCESS)
         {
-            std::cerr << "Failed to create a kernel(lyra888p3). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            std::cerr << "Failed to create a kernel(lyra888p3_htarg). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
             return false;
         }
-        errorCode = clSetKernelArg(m_clKernelLyra888p3, 0, sizeof(cl_mem), &m_clMemHashStorage);
+        errorCode = clSetKernelArg(m_clKernelLyra888p3HTarg, 0, sizeof(cl_mem), &m_clMemHashStorage);
         if (errorCode != CL_SUCCESS)
         {
-            std::cerr << "Error setting kernel argument(0) inside kernel(lyra888p3). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            std::cerr << "Error setting kernel argument(0) inside kernel(lyra888p3_htarg). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
             return false;
         }
-        errorCode = clSetKernelArg(m_clKernelLyra888p3, 1, sizeof(cl_mem), &m_clMemLyraStates);
+        errorCode = clSetKernelArg(m_clKernelLyra888p3HTarg, 1, sizeof(cl_mem), &m_clMemLyraStates);
         if (errorCode != CL_SUCCESS)
         {
-            std::cerr << "Error setting kernel argument(1) inside kernel(lyra888p3). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            std::cerr << "Error setting kernel argument(1) inside kernel(lyra888p3_htarg). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            return false;
+        }
+        errorCode = clSetKernelArg(m_clKernelLyra888p3HTarg, 2, sizeof(cl_mem), &m_clMemHtArgResult); 
+        if (errorCode != CL_SUCCESS)
+        {
+            std::cerr << "Error setting kernel argument(1) inside kernel(lyra888p3_htarg). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
             return false;
         }
         
@@ -366,7 +372,7 @@ namespace lycl
                                gws, expand, 0, nullptr, nullptr);
         }
         // lyra888p3
-        clEnqueueNDRangeKernel(m_clCommandQueue, m_clKernelLyra888p3, 1, nullptr,
+        clEnqueueNDRangeKernel(m_clCommandQueue, m_clKernelLyra888p3HTarg, 1, nullptr,
                                &globalWorkSize1x, &localWorkSize256, 0, nullptr, nullptr);
        
         clFinish(m_clCommandQueue);
@@ -411,6 +417,8 @@ namespace lycl
         clSetKernelArg(m_clKernelBlake32, 9, sizeof(uint32_t), &kernel_data.in16);
         clSetKernelArg(m_clKernelBlake32, 10, sizeof(uint32_t), &kernel_data.in17);
         clSetKernelArg(m_clKernelBlake32, 11, sizeof(uint32_t), &kernel_data.in18);
+        // set htarg for lyra888p3HTarg kernel
+        clSetKernelArg(m_clKernelLyra888p3HTarg, 3, sizeof(uint32_t), &kernel_data.htArg);
     }
     //-----------------------------------------------------------------------------
     inline void AppLyra2Z::getHtArgTestResultAndSize(uint32_t &out_nonce, uint32_t &out_dbgCount)
@@ -442,8 +450,8 @@ namespace lycl
         clReleaseMemObject(m_clMemLyraStates);
         clReleaseMemObject(m_clMemHtArgResult);
         // lyra888p3
-        clReleaseKernel(m_clKernelLyra888p3);
-        clReleaseProgram(m_clProgramLyra888p3);
+        clReleaseKernel(m_clKernelLyra888p3HTarg);
+        clReleaseProgram(m_clProgramLyra888p3HTarg);
         // lyra888p2
         clReleaseKernel(m_clKernelLyra888p2);
         clReleaseProgram(m_clProgramLyra888p2);
