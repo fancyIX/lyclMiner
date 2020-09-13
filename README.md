@@ -1,7 +1,7 @@
 lyclMiner
 ===============
 
-This is a fork branch of lyclMiner. lyclMiner is a high performance OpenCL Lyra2REv2/v3 miner for AMD GCN GPUs. this branch added lyra2Z support to lyclMiner.
+This is a fork branch of lyclMiner. lyclMiner is a high performance OpenCL Lyra2REv2/v3 miner for AMD GCN GPUs. This branch added lyra2Z support to lyclMiner.
 
 **Developer:** CryptoGraphics, fanxyIX
 
