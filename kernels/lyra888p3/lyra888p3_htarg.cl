@@ -1,5 +1,6 @@
 /*
  * Copyright 2018-2019 CryptoGraphics <CrGr@protonmail.com>.
+ * Copyright 2020 fancyIX
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -47,6 +48,7 @@
 
 typedef union {
     uint h[8];
+    ulong h2[4];
     uint4 h4[2];
     ulong2 hl4[2];
     ulong4 h8;
@@ -60,7 +62,7 @@ typedef union {
 } lyraState_t;
 
 __attribute__((reqd_work_group_size(256, 1, 1)))
-__kernel void lyra888p3(__global uint* hashes, __global uint* lyraStates)
+__kernel void lyra888p3_htarg(__global uint* hashes, __global uint* lyraStates, __global uint* output, const uint target)
 {
     int gid = get_global_id(0);
 
@@ -89,6 +91,17 @@ __kernel void lyra888p3(__global uint* hashes, __global uint* lyraStates)
     // 3. store result
     hash->hl4[0] = state[0];
     hash->hl4[1] = state[1];
+
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    if(hash->h[7] <= target)
+    {
+        //atomic_xchg(output, gid);
+        uint ai = atomic_inc(output);
+        
+        //atomic_inc(output+1);
+        output[ai+1] = gid;
+    }
     
     barrier(CLK_GLOBAL_MEM_FENCE);
 }
