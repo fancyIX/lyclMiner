@@ -42,7 +42,8 @@ namespace lycl
         AP_GFX7     = 2,
         AP_GFX8     = 3,
         AP_GFX9     = 4,
-        AP_GFX906   = 5
+        AP_GFX906   = 5,
+        AP_GFX10    = 6
     } EAsmProgram;
     //-----------------------------------------------------------------------------
     typedef enum
@@ -136,6 +137,8 @@ namespace lycl
             out_asm_name = "gfx9";
         else if (!device_name.compare("gfx907"))
             out_asm_name = "gfx9";
+        else if (!device_name.compare("gfx1010"))
+            out_asm_name = "gfx1010";
         //------------------------------------------
         // Unsupported/Untested/Not detected.
         else
@@ -155,6 +158,8 @@ namespace lycl
             result = AP_GFX906;
         else if (arch_name.find("gfx9") != std::string::npos)
             result = AP_GFX9;
+        else if (arch_name.find("gfx10") != std::string::npos)
+            result = AP_GFX10;
         else
             result = AP_None;
 
