@@ -273,23 +273,25 @@ namespace lycl
         }
         else if (in_device.asmProgram == AP_GFX10)
         {
-            m_clProgramLyra888p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra888p2/lyra888p2_gfx10.cl");
+            std::string asmProgramFileName;
+
+            asmProgramFileName = "kernels/lyra888p2/lyra888p2_gfx10.bin";
+
+            m_clProgramLyra888p2 = cluCreateProgramWithBinaryFromFile(m_clContext, in_device.clId, asmProgramFileName);
             if (m_clProgramLyra888p2 == NULL)
-            {
-                std::cerr << "Failed to create CL program from source(lyra888p2). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
-                return false;
-            }
-            usingCrossLaneInstr = true;
+                std::cerr << "Failed to create ASM program(lyra888p2). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            else
+                asmSuccess = true;
         }
         else
         {
             std::cout << "Debug: Asm kernel is not available or disabled. Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
         }
 
-        if (!asmSuccess && in_device.asmProgram != AP_GFX10)
+        if (!asmSuccess)
         {
             // Fallback to the OpenCL kernel.
-            m_clProgramLyra888p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra888p2/lyra888p2.cl");
+            m_clProgramLyra888p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, in_device.asmProgram != AP_GFX10 ? "kernels/lyra888p2/lyra888p2.cl" : "kernels/lyra888p2/lyra888p2_gfx10.cl");
             if (m_clProgramLyra888p2 == NULL)
             {
                 std::cerr << "Failed to create CL program from source(lyra888p2). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
@@ -297,8 +299,9 @@ namespace lycl
             }
         }
         usingPrebuiltBinary = asmSuccess;
+        usingCrossLaneInstr = in_device.asmProgram == AP_GFX10;
 
-        m_clKernelLyra888p2 = clCreateKernel(m_clProgramLyra888p2, usingPrebuiltBinary ? "search2" : "lyra888p2", &errorCode);
+        m_clKernelLyra888p2 = clCreateKernel(m_clProgramLyra888p2, (usingPrebuiltBinary && !usingCrossLaneInstr)  ? "search2" : "lyra888p2", &errorCode);
         if (errorCode != CL_SUCCESS)
         {
             std::cerr << "Failed to create kernel(lyra888p2). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
