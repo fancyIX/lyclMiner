@@ -70,6 +70,7 @@ namespace lycl
         cl_mem m_clMemHtArgResult;
 
         bool usingPrebuiltBinary = false;
+        bool usingCrossLaneInstr = false;
     };
     //-----------------------------------------------------------------------------
     // AppLyra2Z class inline methods implementation.
@@ -270,12 +271,22 @@ namespace lycl
             else
                 asmSuccess = true;
         }
+        else if (in_device.asmProgram == AP_GFX10)
+        {
+            m_clProgramLyra888p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra888p2/lyra888p2_gfx10.cl");
+            if (m_clProgramLyra888p2 == NULL)
+            {
+                std::cerr << "Failed to create CL program from source(lyra888p2). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+                return false;
+            }
+            usingCrossLaneInstr = true;
+        }
         else
         {
             std::cout << "Debug: Asm kernel is not available or disabled. Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
         }
 
-        if (!asmSuccess)
+        if (!asmSuccess && in_device.asmProgram != AP_GFX10)
         {
             // Fallback to the OpenCL kernel.
             m_clProgramLyra888p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra888p2/lyra888p2.cl");
@@ -358,7 +369,7 @@ namespace lycl
         clEnqueueNDRangeKernel(m_clCommandQueue, m_clKernelLyra888p1, 1, nullptr,
                                &globalWorkSize1x, &localWorkSize256, 0, nullptr, nullptr);
         // lyra888p2
-        if (usingPrebuiltBinary) {
+        if (usingPrebuiltBinary || usingCrossLaneInstr) {
             const size_t off[] = { 0, 0, 0 };
 	        const size_t gws[] = { 4, 4, globalWorkSize1x / 2 };
 	        const size_t expand[] = { 4, 4, 16 };
