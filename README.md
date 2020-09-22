@@ -1,7 +1,7 @@
 lyclMiner
 ===============
 
-This is a fork branch of lyclMiner. lyclMiner is a high performance OpenCL Lyra2REv2/v3 miner for AMD GCN GPUs. This branch added lyra2Z support to lyclMiner.
+This is a fork branch of lyclMiner. lyclMiner is a high performance OpenCL Lyra2REv2/v3 miner for AMD GCN GPUs. This branch added lyra2Z and Navi support to lyclMiner.
 
 **Developer:** CryptoGraphics, fanxyIX
 
@@ -139,7 +139,8 @@ Specifies a binary format for asm programs. Asm programs are faster than high-le
   - `gfx6` (GCN 1st generation, Windows and Lyra2REv3 only)  
   - `gfx7` (GCN 2nd generation, not available on ROCm)  
   - `gfx8` (GCN 3rd and 4th generations)  
-  - `gfx9` (GCN 5nd generation)  
+  - `gfx9` (GCN 5nd generation)
+  - `gfx10` (RDNA 1st generation)  
 
 - **WorkSize**  
 Possible values: Minimal value is 256. Must be multiple of 256.  
