@@ -299,6 +299,18 @@ namespace lycl
             else
                 asmSuccess = true;
         }
+        else if (in_device.asmProgram == AP_GFX10)
+        {
+            std::string asmProgramFileName;
+
+            asmProgramFileName = "kernels/lyra441p2/rev3/lyra441p2_gfx10.bin";
+
+            m_clProgramLyra441p2 = cluCreateProgramWithBinaryFromFile(m_clContext, in_device.clId, asmProgramFileName);
+            if (m_clProgramLyra441p2 == NULL)
+                std::cerr << "Failed to create ASM program(lyra441p2(rev3)). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
+            else
+                asmSuccess = true;
+        }
         else
         {
             std::cout << "Debug: Asm kernel is not available or disabled. Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;
@@ -307,7 +319,7 @@ namespace lycl
         if (!asmSuccess)
         {
             // Fallback to the OpenCL kernel.
-            m_clProgramLyra441p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, "kernels/lyra441p2/rev3/lyra441p2.cl");
+            m_clProgramLyra441p2 = cluCreateProgramFromFile(m_clContext, in_device.clId, in_device.asmProgram == AP_GFX10 ? "kernels/lyra441p2/rev3/lyra441p2_gfx10.cl" : "kernels/lyra441p2/rev3/lyra441p2.cl");
             if (m_clProgramLyra441p2 == NULL)
             {
                 std::cerr << "Failed to create CL program from source(lyra441p2(rev3)). Device(" << deviceName << ") Platform index(" << in_device.platformIndex << ")" << std::endl;

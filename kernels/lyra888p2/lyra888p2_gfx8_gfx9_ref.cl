@@ -51,6 +51,7 @@
 }
 
 
+#if defined(__GCNMINC__)
 uint2 __attribute__((overloadable)) amd_bitalign(uint2 src0, uint2 src1, uint src2)
 {
 	uint dstx = 0;
@@ -73,6 +74,10 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		    [src0y] "v" (src0.y), [src1y] "v" (src1.y), [src2y] "v" (src2));
 	return (uint2) (dstx, dsty);
 }
+#else
+#pragma OPENCL EXTENSION cl_amd_media_ops : enable
+#pragma OPENCL EXTENSION cl_amd_media_ops2 : enable
+#endif
 
 #define ROTR64(x2, y) as_ulong(y < 32 ? (y % 8 == 0 ? (((amd_bytealign(x2.s10, x2, y / 8)))) : (((amd_bitalign(x2.s10, x2, y))))) : (((amd_bitalign(x2, x2.s10, (y - 32))))))
 #define ROTR64_24(x2) as_ulong(amd_bytealign(x2.s10, x2, 3))
@@ -81,23 +86,41 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 
 /// lyra2 algo  ///////////////////////////////////////////////////////////
 #define HASH_SIZE (256 / 8) // size in bytes of an hash in/out
-#define SLOT (get_global_id(1))
+#define SLOT (get_global_id(1) - get_global_offset(1))
 #define LOCAL_LINEAR (get_local_id(0) & 3)
 #define REG_ROW_COUNT (1) // ideally all happen at the same clock
 #define STATE_BLOCK_COUNT (1 * REG_ROW_COUNT)  // very close instructions
 #define LYRA_ROUNDS 8
 #define HYPERMATRIX_COUNT (LYRA_ROUNDS * STATE_BLOCK_COUNT)
 
+#define SETSGPR100101 \
+    __asm ( \
+	    "s_mov_b32 s100, 0xAAAAAAAA\n" \
+		"s_mov_b32 s101, 0xAAAAAAAA\n");
+
+#ifdef __gfx803__
 #define ADD32_DPP(a, b) \
     __asm ( \
-	    "v_add_co_u32  %[aa], vcc_lo, %[bb], %[aa]\n" \
-		"s_lshl_b32 vcc_lo, vcc_lo, 1\n" \
-		"s_and_b32 vcc_lo, vcc_lo, 0xAAAAAAAA\n" \
-		"v_add_co_ci_u32 %[daa], vcc_lo, 0, %[aa], vcc_lo\n" \
-		: [daa] "=v" (a) \
+	    "v_add_u32  %[daa], vcc, %[bb], %[aa]\n" \
+		"s_lshl_b64 vcc, vcc, 1\n" \
+		"s_and_b64 vcc, vcc, s[100:101]\n" \
+		"v_addc_u32_e32 %[ddaa], vcc, 0, %[daa], vcc\n" \
+		: [daa] "=&v" (a) \
 		: [aa] "0" (a), \
 		  [bb] "v" (b) \
 		: "vcc");
+#else
+#define ADD32_DPP(a, b) \
+    __asm ( \
+	    "v_add_co_u32  %[daa], vcc, %[bb], %[aa]\n" \
+		"s_lshl_b64 vcc, vcc, 1\n" \
+		"s_and_b64 vcc, vcc, s[100:101]\n" \
+		"v_addc_co_u32 %[daa], vcc, 0, %[daa], vcc\n" \
+		: [daa] "=&v" (a) \
+		: [aa] "0" (a), \
+		  [bb] "v" (b) \
+		: "vcc");
+#endif
 
 #define SWAP32_DPP(s) \
     ss = s; \
@@ -106,7 +129,7 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 	      "s_nop 1\n" \
 		  "v_mov_b32_dpp  %[p], %[pp] quad_perm:[1,0,3,2]\n" \
 		  "s_nop 1" \
-		  : [p] "=v" (s) \
+		  : [p] "=&v" (s) \
 		  : [pp] "v" (ss)); \
 	}
 
@@ -118,8 +141,8 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		  "v_mov_b32_dpp  %[dpp], %[pp] quad_perm:[1,0,3,2]\n" \
 		  "s_nop 1\n" \
 		  "v_alignbyte_b32 %[dp], %[dpp], %[p], 3" \
-		  : [dpp] "=v" (ss), \
-		    [dp] "=v" (s) \
+		  : [dpp] "=&v" (ss), \
+		    [dp] "=&v" (s) \
 		  : [pp] "0" (ss), \
 		    [p] "1" (s)); \
 	}
@@ -132,8 +155,8 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		  "v_mov_b32_dpp  %[dpp], %[pp] quad_perm:[1,0,3,2]\n" \
 		  "s_nop 1\n" \
 		  "v_alignbyte_b32 %[dp], %[dpp], %[p], 2" \
-		  : [dpp] "=v" (ss), \
-		    [dp] "=v" (s) \
+		  : [dpp] "=&v" (ss), \
+		    [dp] "=&v" (s) \
 		  : [pp] "0" (ss), \
 		    [p] "1" (s)); \
 	}
@@ -146,8 +169,8 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		  "v_mov_b32_dpp  %[dpp], %[pp] quad_perm:[1,0,3,2]\n" \
 		  "s_nop 1\n" \
 		  "v_alignbit_b32 %[dp], %[p], %[dpp], 31" \
-		  : [dpp] "=v" (ss), \
-		    [dp] "=v" (s) \
+		  : [dpp] "=&v" (ss), \
+		    [dp] "=&v" (s) \
 		  : [pp] "0" (ss), \
 		    [p] "1" (s)); \
 	}
@@ -167,9 +190,9 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		  "v_mov_b32_dpp  %[dp20], %[p20] row_ror:8\n" \
 		  "v_mov_b32_dpp  %[dp30], %[p30] row_ror:4\n" \
 		  "s_nop 1" \
-		  : [dp10] "=v" (state[1]), \
-			[dp20] "=v" (state[2]), \
-			[dp30] "=v" (state[3]) \
+		  : [dp10] "=&v" (state[1]), \
+			[dp20] "=&v" (state[2]), \
+			[dp30] "=&v" (state[3]) \
 		  : [p10] "0" (state[1]), \
 			[p20] "1" (state[2]), \
 			[p30] "2" (state[3]));
@@ -181,9 +204,9 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		  "v_mov_b32_dpp  %[dp20], %[p20] row_ror:8\n" \
 		  "v_mov_b32_dpp  %[dp30], %[p30] row_ror:12\n" \
 		  "s_nop 1" \
-		  : [dp10] "=v" (state[1]), \
-			[dp20] "=v" (state[2]), \
-			[dp30] "=v" (state[3]) \
+		  : [dp10] "=&v" (state[1]), \
+			[dp20] "=&v" (state[2]), \
+			[dp30] "=&v" (state[3]) \
 		  : [p10] "0" (state[1]), \
 			[p20] "1" (state[2]), \
 			[p30] "2" (state[3]));
@@ -205,9 +228,9 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 		  "v_mov_b32_dpp  %[dp20], %[p20] row_ror:4\n" \
 		  "v_mov_b32_dpp  %[dp30], %[p30] row_ror:4\n" \
 		  "s_nop 1" \
-		  : [dp10] "=v" (s0), \
-			[dp20] "=v" (s1), \
-			[dp30] "=v" (s2) \
+		  : [dp10] "=&v" (s0), \
+			[dp20] "=&v" (s1), \
+			[dp30] "=&v" (s2) \
 		  : [p10] "0" (s0), \
 			[p20] "1" (s1), \
 			[p30] "2" (s2)); \
@@ -331,17 +354,17 @@ uint2 __attribute__((overloadable)) amd_bytealign(uint2 src0, uint2 src1, uint s
 	__asm ( \
 		  "s_nop 0\n" \
 		  "v_mov_b32_dpp  %[dp0], %[p0] quad_perm:[0,0,2,2]\n" \
-		  "v_mov_b32_dpp  %[p1], %[p1] quad_perm:[0,0,2,2]\n" \
-		  "v_mov_b32_dpp  %[p2], %[p2] quad_perm:[0,0,2,2]\n" \
-		  "v_mov_b32_dpp  %[p3], %[p3] quad_perm:[0,0,2,2]\n" \
-		  "v_mov_b32_dpp  %[dp1], %[p1] row_ror:4\n" \
-		  "v_mov_b32_dpp  %[dp2], %[p2] row_ror:8\n" \
-		  "v_mov_b32_dpp  %[dp3], %[p3] row_ror:12\n" \
+		  "v_mov_b32_dpp  %[dp1], %[p1] quad_perm:[0,0,2,2]\n" \
+		  "v_mov_b32_dpp  %[dp2], %[p2] quad_perm:[0,0,2,2]\n" \
+		  "v_mov_b32_dpp  %[dp3], %[p3] quad_perm:[0,0,2,2]\n" \
+		  "v_mov_b32_dpp  %[dp1], %[dp1] row_ror:4\n" \
+		  "v_mov_b32_dpp  %[dp2], %[dp2] row_ror:8\n" \
+		  "v_mov_b32_dpp  %[dp3], %[dp3] row_ror:12\n" \
 		  "s_nop 0" \
-		  : [dp0] "=v" (p0), \
-		    [dp1] "=v" (p1), \
-		    [dp2] "=v" (p2), \
-			[dp3] "=v" (p3) \
+		  : [dp0] "=&v" (p0), \
+		    [dp1] "=&v" (p1), \
+		    [dp2] "=&v" (p2), \
+			[dp3] "=&v" (p3) \
 		  : [p0] "0" (p0), \
 		    [p1] "1" (p1), \
 			[p2] "2" (p2), \
@@ -473,6 +496,7 @@ typedef union {
 
 __attribute__((amdgpu_waves_per_eu(1,1)))
 __attribute__((amdgpu_num_vgpr(256)))
+__attribute__((amdgpu_num_sgpr(100)))
 __attribute__((reqd_work_group_size(4, 4, 16)))
 __kernel void lyra888p2(__global uchar* sharedDataBuf)
 {
@@ -497,6 +521,7 @@ uint gid = get_global_id(2);
   uint ss;
   uint carry;
   const uint mindex = (LOCAL_LINEAR & 1) == 0 ? 0 : 1;
+  SETSGPR100101;
   //-------------------------------------
   // Load Lyra state
   if (LOCAL_LINEAR == 0) state[0] = ((uint)(lyraState->h4[2 * player + 2 * 4 * 0]));
