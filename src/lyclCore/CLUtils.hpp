@@ -138,7 +138,13 @@ namespace lycl
         else if (!device_name.compare("gfx907"))
             out_asm_name = "gfx9";
         else if (!device_name.compare("gfx1010"))
-            out_asm_name = "gfx1010";
+            out_asm_name = "gfx10";
+        else if (!device_name.compare("gfx1011"))
+            out_asm_name = "gfx10";
+        else if (!device_name.compare("gfx1012"))
+            out_asm_name = "gfx10";
+        else if (!device_name.compare("gfx1030"))
+            out_asm_name = "gfx10";
         //------------------------------------------
         // Unsupported/Untested/Not detected.
         else
